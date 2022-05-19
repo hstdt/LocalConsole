@@ -10,6 +10,7 @@ import SwiftUI
 
 var GLOBAL_BORDER_TRACKERS: [BorderManager] = []
 
+@available(iOS 14.0, *)
 @available(iOSApplicationExtension, unavailable)
 public class LCManager: NSObject, UIGestureRecognizerDelegate {
     
@@ -1402,6 +1403,7 @@ fileprivate func _debugPrint(_ items: Any) {
 }
 
 // Support for auto-rotate.
+@available(iOS 14.0, *)
 class ConsoleViewController: UIViewController {
     
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {

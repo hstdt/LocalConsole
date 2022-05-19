@@ -41,6 +41,7 @@ extension UIFont {
     }
 }
 
+@available(iOS 14.0, *)
 extension UIControl {
     func addActions(highlightAction: UIAction, unhighlightAction: UIAction) {
         addAction(highlightAction, for: .touchDown)

@@ -7,6 +7,7 @@
 
 import UIKit
 
+@available(iOS 14.0, *)
 @available(iOSApplicationExtension, unavailable)
 class ResizeController {
     
@@ -370,6 +371,7 @@ class ResizeController {
     }
 }
 
+@available(iOS 14.0, *)
 @available(iOSApplicationExtension, unavailable)
 class PlatterView: UIView {
     
