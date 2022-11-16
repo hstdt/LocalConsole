@@ -137,11 +137,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
         }
     }
     
-    /// Strong reference keeps the window alive.
-    var consoleWindow: ConsoleWindow?
-    
-    /// Enables rotation.
-    lazy var viewController = ConsoleViewController()
+    lazy var consoleViewController = ConsoleViewController()
     
     /// Note: The console always needs a parent view controller in order to display context menus. In this case, the parent controller will be the viewController.
     lazy var consoleView = UIView()
@@ -150,7 +146,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
     lazy var consoleTextView = InvertedTextView() 
     
     /// Button that reveals menu.
-    lazy var menuButton = UIButton()
+    lazy var menuButton = ConsoleMenuButton()
     
     /// Tracks whether the PiP console is in text view scroll mode or pan mode.
     var scrollLocked = true
@@ -163,15 +159,13 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
     
     /// Gesture endpoints. Each point represents a corner of the screen. TODO: Handle screen rotation.
     var possibleEndpoints: [CGPoint] {
-        guard let consoleWindow = consoleWindow else { return [] }
-        
-        let screenSize = viewController.view.frame.size
+        let screenSize = consoleViewController.view.frame.size
         
         // Must check for portrait mode manually here. UIDevice was reporting orientation incorrectly before.
-        let isPortraitNotchedPhone = UIDevice.current.hasNotch && viewController.view.frame.size.width < viewController.view.frame.size.height
+        let isPortraitNotchedPhone = UIDevice.current.hasNotch && consoleViewController.view.frame.size.width < consoleViewController.view.frame.size.height
         
         // Fix incorrect reported orientation on phone.
-        let isLandscapePhone = UIDevice.current.userInterfaceIdiom == .phone && viewController.view.frame.width > viewController.view.frame.height
+        let isLandscapePhone = UIDevice.current.userInterfaceIdiom == .phone && consoleViewController.view.frame.width > consoleViewController.view.frame.height
         
         let isLandscapeLeftNotchedPhone = UIDevice.current.orientation == .landscapeLeft
         && UIDevice.current.userInterfaceIdiom == .phone
@@ -183,10 +177,12 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
         && UIDevice.current.hasNotch
         && isLandscapePhone
         
-        let leftEndpointX = consoleSize.width / 2 + consoleWindow.safeAreaInsets.left + (isLandscapePhone ? 4 : 12) + (isLandscapeRightNotchedPhone ? -16 : 0)
-        let rightEndpointX = screenSize.width - (consoleSize.width / 2 + consoleWindow.safeAreaInsets.right) - (isLandscapePhone ? 4 : 12) + (isLandscapeLeftNotchedPhone ? 16 : 0)
-        let topEndpointY = consoleSize.height / 2 + consoleWindow.safeAreaInsets.top + 12 + (isPortraitNotchedPhone ? -10 : 0)
-        let bottomEndpointY = screenSize.height - consoleSize.height / 2 - (keyboardHeight ?? consoleWindow.safeAreaInsets.bottom) - 12 + (isLandscapePhone ? 10 : 0)
+        let safeAreaInsets = consoleViewController.view.safeAreaInsets
+        
+        let leftEndpointX = consoleSize.width / 2 + safeAreaInsets.left + (isLandscapePhone ? 4 : 12) + (isLandscapeRightNotchedPhone ? -16 : 0)
+        let rightEndpointX = screenSize.width - (consoleSize.width / 2 + safeAreaInsets.right) - (isLandscapePhone ? 4 : 12) + (isLandscapeLeftNotchedPhone ? 16 : 0)
+        let topEndpointY = consoleSize.height / 2 + safeAreaInsets.top + 12 + (isPortraitNotchedPhone ? -10 : 0)
+        let bottomEndpointY = screenSize.height - consoleSize.height / 2 - (keyboardHeight ?? safeAreaInsets.bottom) - 12 + (isLandscapePhone ? 10 : 0)
         
         if consoleSize.width < screenSize.width - 112 {
             // Four endpoints, one for each corner.
@@ -324,10 +320,12 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
         let diameter = CGFloat(30)
         
         // This tuned button frame is used to adjust where the menu appears.
-        menuButton = UIButton(frame: CGRect(x: consoleView.bounds.width - 44,
-                                            y: consoleView.bounds.height - 36,
-                                            width: 44,
-                                            height: 36 + 4 /*Offests the context menu by the desired amount*/))
+        menuButton.frame = CGRect(
+            x: consoleView.bounds.width - 44,
+            y: consoleView.bounds.height - 36,
+            width: 44,
+            height: 36 + 4 /*Offests the context menu by the desired amount*/
+        )
         menuButton.autoresizingMask = [.flexibleLeftMargin, .flexibleTopMargin]
         
         let circleFrame = CGRect(
@@ -358,15 +356,15 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
     }
     
-    /// Adds a LocalConsole window to the app's main scene.
-    func configureWindow() {
-        var windowSceneFound = false
+    /// Adds a consoleViewController to the app's main window.
+    func configureConsoleViewController() {
+        var windowFound = false
         
         // Update console cached based on last-cached origin.
         func updateConsoleOrigin() {
             snapToCachedEndpoint()
             
-            if consoleView.center.x < 0 || consoleView.center.x > viewController.view.frame.size.width {
+            if consoleView.center.x < 0 || consoleView.center.x > consoleViewController.view.frame.size.width {
                 grabberMode = true
                 scrollLocked = !grabberMode
                 
@@ -378,43 +376,56 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
         }
         
         // Configure console window.
-        func fetchWindowScene() {
-            let windowScene = UIApplication.shared
-                .connectedScenes
-                .filter { $0.activationState == .foregroundActive }
-                .first
+        func fetchWindow() -> UIWindow? {
+            if #available(iOS 15.0, *) {
+                let windowScene = UIApplication.shared
+                    .connectedScenes
+                    .filter { $0.activationState == .foregroundActive }
+                    .first
+                
+                if let windowScene = windowScene as? UIWindowScene, let keyWindow = windowScene.keyWindow {
+                    return keyWindow
+                }
+                return nil
+            } else {
+                return UIApplication.shared.windows.first
+            }
             
-            if let windowScene = windowScene as? UIWindowScene {
-                windowSceneFound = true
-                
-                UIWindow.swizzleStatusBarAppearanceOverride()
-                SwizzleTool().swizzleContextMenuReverseOrder()
-                
-                consoleWindow = ConsoleWindow(windowScene: windowScene)
-                consoleWindow?.frame = UIScreen.main.bounds
-                consoleWindow?.windowLevel = UIWindow.Level.statusBar
-                consoleWindow?.isHidden = false
-                
-                viewController.view = PassthroughView()
-                
-                consoleWindow?.rootViewController = viewController
-                
-                viewController.view.addSubview(consoleView)
-                
-                updateConsoleOrigin()
+        }
+        
+        func addConsoleToWindow(window: UIWindow) {
+            
+            window.addSubview(consoleViewController.view)
+            window.rootViewController?.addChild(consoleViewController)
+            
+            consoleViewController.view = PassthroughView()
+            consoleViewController.view.addSubview(consoleView)
+            
+            consoleViewController.view.frame = window.bounds
+            consoleViewController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            
+            updateConsoleOrigin()
+            
+            SwizzleTool().swizzleContextMenuReverseOrder()
+            
+            // Ensure console view always stays above other views.
+            SwizzleTool().swizzleDidAddSubview {
+                window.bringSubviewToFront(self.consoleViewController.view)
             }
         }
         
         /// Ensures the window is configured (i.e. scene has been found). If not, delay and wait for a scene to prepare itself, then try again.
         for i in 1...10 {
-            
             let delay = Double(i) / 10
             
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
                 
-                guard !windowSceneFound else { return }
+                guard !windowFound else { return }
                 
-                fetchWindowScene()
+                if let window = fetchWindow() {
+                    windowFound = true
+                    addConsoleToWindow(window: window)
+                }
                 
                 if isVisible {
                     isVisible = false
@@ -426,8 +437,10 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
     }
     
     func snapToCachedEndpoint() {
-        let cachedConsolePosition = CGPoint(x: UserDefaults.standard.object(forKey: "LocalConsole.X") as? CGFloat ?? possibleEndpoints.first!.x,
-                                            y: UserDefaults.standard.object(forKey: "LocalConsole.Y") as? CGFloat ?? possibleEndpoints.first!.y)
+        let cachedConsolePosition = CGPoint(
+            x: UserDefaults.standard.object(forKey: "LocalConsole.X") as? CGFloat ?? possibleEndpoints.first!.x,
+            y: UserDefaults.standard.object(forKey: "LocalConsole.Y") as? CGFloat ?? possibleEndpoints.first!.y
+        )
         
         consoleView.center = cachedConsolePosition // Update console center so possibleEndpoints are calculated correctly.
         consoleView.center = nearestTargetTo(cachedConsolePosition, possibleTargets: possibleEndpoints)
@@ -443,7 +456,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
                 
                 if !isConsoleConfigured {
                     DispatchQueue.main.async { [self] in
-                        configureWindow()
+                        configureConsoleViewController()
                         configureConsole()
                         isConsoleConfigured = true
                     }
@@ -533,6 +546,60 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
         }
     }
     
+    @objc func handleDeviceOrientationChange(previousSize: CGSize) {
+        
+        // Cancel the panner console is being panned to allow for location manipulation.
+        [LCManager.shared.panRecognizer, LCManager.shared.longPressRecognizer].forEach {
+            $0.isEnabled.toggle(); $0.isEnabled.toggle()
+        }
+        
+        if UIDevice.current.userInterfaceIdiom != .pad && ResizeController.shared.isActive {
+            ResizeController.shared.isActive = false
+            ResizeController.shared.platterView.dismiss()
+        }
+        
+        if UIDevice.current.userInterfaceIdiom == .pad && ResizeController.shared.isActive {
+            DispatchQueue.main.async {
+                UIViewPropertyAnimator(duration: 0.6, dampingRatio: 1) {
+                    LCManager.shared.consoleView.center = ResizeController.shared.consoleCenterPoint
+                }.startAnimation(afterDelay: 0.05)
+            }
+        } else {
+            let consoleView = LCManager.shared.consoleView
+            
+            let targetLocationEstimate: CGPoint = {
+                var xPosition = consoleView.center.x
+                var yPosition = consoleView.center.y
+                
+                if consoleView.center.x > previousSize.width / 2 {
+                    xPosition += consoleViewController.view.frame.width - previousSize.width
+                }
+                
+                if consoleView.center.y > previousSize.height / 2 {
+                    yPosition += consoleViewController.view.frame.height - previousSize.height
+                }
+                
+                return CGPoint(x: xPosition, y: yPosition)
+            }()
+            
+            UIViewPropertyAnimator(duration: 0.6, dampingRatio: 1) {
+                consoleView.center = targetLocationEstimate
+            }.startAnimation(afterDelay: 0.05)
+            
+            DispatchQueue.main.async {
+                // Update portrait orientation menu option for resize controller.
+                LCManager.shared.menuButton.menu = LCManager.shared.makeMenu()
+                
+                // Reassess center of console based on target location estimate.
+                UIViewPropertyAnimator(duration: 0.6, dampingRatio: 1) {
+                    consoleView.center = nearestTargetTo(consoleView.center, possibleTargets: LCManager.shared.possibleEndpoints)
+                }.startAnimation(afterDelay: 0.05)
+                
+                LCManager.shared.reassessGrabberMode()
+            }
+        }
+    }
+    
     var hasShortened = false
     
     public var isCharacterLimitDisabled = false
@@ -581,10 +648,9 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
     // MARK: Handle keyboard show/hide.
     private var keyboardHeight: CGFloat? = nil {
         didSet {
-            
             temporaryKeyboardHeightValueTracker = oldValue
             
-            if consoleView.center != possibleEndpoints[0] && consoleView.center != possibleEndpoints[1] {
+            if possibleEndpoints.count > 2, consoleView.center != possibleEndpoints[0] && consoleView.center != possibleEndpoints[1] {
                 let nearestTargetPosition = nearestTargetTo(consoleView.center, possibleTargets: possibleEndpoints.suffix(2))
                 
                 UIViewPropertyAnimator(duration: 0.55, dampingRatio: 1) {
@@ -651,7 +717,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
             
             if currentText != "" { print("\n") }
             
-            dynamicReportTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+            dynamicReportTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [self] timer in
                 
                 guard consoleTextView.panGestureRecognizer.numberOfTouches == 0 else { return }
                 
@@ -716,7 +782,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
             
             if currentText != "" { print("\n") }
             
-            let safeAreaInsets = consoleWindow?.safeAreaInsets ?? .zero
+            let safeAreaInsets = consoleViewController.view.safeAreaInsets ?? .zero
             
             print(
                   """
@@ -771,36 +837,32 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
     public var showAllUserDefaultsKeys = false
     
     func makeMenu() -> UIMenu {
+        let share = UIAction(title: "Share Text...", image: UIImage(systemName: "square.and.arrow.up")) { _ in
+            let activityViewController = UIActivityViewController(
+                activityItems: [self.consoleTextView.text ?? ""],
+                applicationActivities: nil
+            )
+            self.consoleViewController.present(activityViewController, animated: true)
+        }
         
-        let share = UIAction(title: "Share Text...",
-                            image: UIImage(systemName: "square.and.arrow.up"), handler: { _ in
-            let activityViewController = UIActivityViewController(activityItems: [self.consoleTextView.text ?? ""],
-                                                                  applicationActivities: nil)
-            self.viewController.present(activityViewController, animated: true)
-        })
-        
-        let resize = UIAction(title: "Resize Console",
-                              image: UIImage(systemName: "arrow.left.and.right.square"), handler: { _ in
+        let resize = UIAction(title: "Resize Console", image: UIImage(systemName: "arrow.up.backward.and.arrow.down.forward")) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 ResizeController.shared.isActive.toggle()
                 ResizeController.shared.platterView.reveal()
             }
-        })
+        }
         
         // If device is phone in landscape, disable resize controller.
-        if UIDevice.current.userInterfaceIdiom == .phone && viewController.view.frame.width > viewController.view.frame.height {
+        if UIDevice.current.userInterfaceIdiom == .phone && consoleViewController.view.frame.width > consoleViewController.view.frame.height {
             resize.attributes = .disabled
             if #available(iOS 15, *) {
                 resize.subtitle = "Portrait Orientation Only"
             }
         }
         
-        let clear = UIAction(title: "Clear Console",
-                             image: UIImage(systemName: "xmark.square"), handler: { _ in
+        let clear = UIAction(title: "Clear Console", image: UIImage(systemName: "delete.backward"), attributes: .destructive) { _ in
             self.clear()
-        })
-        
-        let consoleActions = UIMenu(title: "", options: .displayInline, children: [clear, resize])
+        }
         
         var frameSymbol = "rectangle.3.offgrid"
         
@@ -895,7 +957,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
                                 alertController.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: { _ in
                                 }))
                                 
-                                self.viewController.present(alertController,
+                                self.consoleViewController.present(alertController,
                                                             animated: true)
                             }
                             action.subtitle = "\(value)"
@@ -924,16 +986,17 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
         }
         
         
-        let viewFrames = UIAction(title: debugBordersEnabled ? "Hide View Frames" : "Show View Frames",
-                                  image: UIImage(systemName: frameSymbol), handler: { _ in
+        let viewFrames = UIAction(
+            title: debugBordersEnabled ? "Hide View Frames" : "Show View Frames",
+            image: UIImage(systemName: frameSymbol)
+        ) { _ in
             self.debugBordersEnabled.toggle()
             self.menuButton.menu = self.makeMenu()
-        })
+        }
         
-        let systemReport = UIAction(title: "System Report",
-                                    image: UIImage(systemName: "cpu"), handler: { _ in
+        let systemReport = UIAction(title: "System Report", image: UIImage(systemName: "cpu")) { _ in
             self.systemReport()
-        })
+        }
         
         // Show the right glyph for the current device being used.
         let deviceSymbol: String = {
@@ -957,13 +1020,15 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
             }
         }()
         
-        let displayReport = UIAction(title: "Display Report",
-                                     image: UIImage(systemName: deviceSymbol), handler: { _ in
+        let displayReport = UIAction(title: "Display Report", image: UIImage(systemName: deviceSymbol)) { _ in
             self.displayReport()
-        })
+        }
         
-        let respring = UIAction(title: "Restart Spring" + "Board",
-                                image: UIImage(systemName: "apps.iphone"), handler: { _ in
+        let terminateApplication = UIAction(title: "Terminate App", image: UIImage(systemName: "xmark"), attributes: .destructive) { _ in
+            UIApplication.shared.perform(NSSelectorFromString("terminateWithSuccess"))
+        }
+        
+        let respring = UIAction(title: "Restart Spring" + "Board", image: UIImage(systemName: "arrowtriangle.backward"), attributes: .destructive) { _ in
             
             guard let window = UIApplication.shared.windows.first else { return }
             
@@ -979,28 +1044,36 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
             for _ in 0...1000 {
                 DispatchQueue.global(qos: .default).async {
                     
-                    // This will cause jetsam to terminate SpringBoard.
+                    // This will cause jetsam to terminate backboardd.
                     while true {
                         window.snapshotView(afterScreenUpdates: false)
                     }
                 }
             }
-        })
+        }
         
-        debugActions.append(contentsOf: [viewFrames, systemReport, displayReport, respring])
+        debugActions.append(contentsOf: [viewFrames, systemReport, displayReport])
+        let destructActions = [terminateApplication , respring]
         
-        let debugMenu = UIMenu(title: "", options: .displayInline,
-                                  children: [UIMenu(title: "Debug", image: UIImage(systemName: "ant"),
-                                                    children: debugActions)])
+        let debugMenu = UIMenu(
+            title: "Debug", image: UIImage(systemName: "ant"),
+            children: [
+                UIMenu(title: "", options: .displayInline, children: debugActions),
+                UIMenu(title: "", options: .displayInline, children: destructActions),
+            ]
+        )
         
         var menuContent: [UIMenuElement] = []
         
         if consoleTextView.text != "" {
-            menuContent.append(contentsOf: [share, consoleActions])
+            menuContent.append(contentsOf: [UIMenu(title: "", options: .displayInline, children: [share, resize])])
         } else {
-            menuContent.append(resize)
+            menuContent.append(UIMenu(title: "", options: .displayInline, children: [resize]))
         }
         menuContent.append(debugMenu)
+        if consoleTextView.text != "" {
+            menuContent.append(UIMenu(title: "", options: .displayInline, children: [clear]))
+        }
         
         return UIMenu(title: "", children: menuContent)
     }
@@ -1119,7 +1192,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
     }
     
     func reassessGrabberMode() {
-        if consoleView.frame.maxX > 30 && consoleView.frame.minX < viewController.view.frame.size.width - 30 {
+        if consoleView.frame.maxX > 30 && consoleView.frame.minX < consoleViewController.view.frame.size.width - 30 {
             grabberMode = false
         } else {
             grabberMode = true
@@ -1178,30 +1251,27 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
     }
 }
 
-// Custom window for the console to appear above other windows while passing touches down.
-class ConsoleWindow: UIWindow {
-    
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+/// Custom button that pauses console window swizzling to allow the console menu's presenting view controller to remain the top view controller.
+class ConsoleMenuButton: UIButton {
+    override func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
         
-        if let hitView = super.hitTest(point, with: event) {
-            return hitView.isKind(of: ConsoleWindow.self) ? nil : hitView
-        }
-        return super.hitTest(point, with: event)
+        SwizzleTool.pauseDidAddSubviewSwizzledClosure = true
+    }
+    
+    override func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        
+        SwizzleTool.pauseDidAddSubviewSwizzledClosure = false
     }
 }
 
-// Custom view for the console to appear above other windows while passing touches down.
+// Custom view that is passes touches .
 class PassthroughView: UIView {
-    
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        
-        if let hitView = super.hitTest(point, with: event) {
-            return hitView.isKind(of: PassthroughView.self) ? nil : hitView
-        }
-        return super.hitTest(point, with: event)
+        let hitView = super.hitTest(point, with: event)
+        return hitView == self ? nil : hitView
     }
 }
-
 
 import UIKit.UIGestureRecognizerSubclass
 
@@ -1235,22 +1305,6 @@ extension UIView {
     }
 }
 
-extension UIWindow {
-    
-    /// Make sure this window does not have control over the status bar appearance.
-    static func swizzleStatusBarAppearanceOverride() {
-        guard let originalMethod = class_getInstanceMethod(UIWindow.self, NSSelectorFromString("_can" + "Affect" + "Status" + "Bar" + "Appearance")),
-              let swizzledMethod = class_getInstanceMethod(UIWindow.self, #selector(swizzled_statusBarAppearance))
-        else { return }
-        
-        method_exchangeImplementations(originalMethod, swizzledMethod)
-    }
-    
-    @objc func swizzled_statusBarAppearance() -> Bool {
-        return isKeyWindow
-    }
-}
-
 class SwizzleTool: NSObject {
     
     /// Ensure context menus always show in a non reversed order.
@@ -1263,7 +1317,6 @@ class SwizzleTool: NSObject {
     }
 
     @objc func swizzled_reverses_Action_Order() -> Bool {
-        
         if let menu = self.value(forKey: "displayed" + "Menu") as? UIMenu,
            menu.title == "Debug" || menu.title == "User" + "Defaults" {
             return false
@@ -1275,47 +1328,82 @@ class SwizzleTool: NSObject {
         
         return false
     }
-}
+    
+    static var swizzledDidAddSubviewClosure: (() -> Void)?
+    static var pauseDidAddSubviewSwizzledClosure: Bool = false
+    
+    func swizzleDidAddSubview(_ closure: @escaping () -> Void) {
+        guard let originalMethod = class_getInstanceMethod(UIWindow.self, #selector(UIWindow.didAddSubview(_:))),
+              let swizzledMethod = class_getInstanceMethod(SwizzleTool.self, #selector(swizzled_did_add_subview(_:)))
+        else { Swift.print("Swizzle Error Occurred"); return }
+        
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+        
+        Self.swizzledDidAddSubviewClosure = closure
+    }
 
+    @objc func swizzled_did_add_subview(_ subview: UIView) {
+        guard !Self.pauseDidAddSubviewSwizzledClosure else { return }
+        
+        if let closure = Self.swizzledDidAddSubviewClosure {
+            closure()
+        }
+    }
+}
 
 class LumaView: UIView {
     lazy var visualEffectView: UIView = {
         Bundle(path: "/Sys" + "tem/Lib" + "rary/Private" + "Framework" + "s/Material" + "Kit." + "framework")!.load()
-        
-        let Pill = NSClassFromString("MT" + "Luma" + "Dodge" + "Pill" + "View") as! UIView.Type
-        
-        let pillView = Pill.init()
-        
-        enum Style: Int {
-            case none = 0
-            case thin = 1
-            case gray = 2
-            case black = 3
-            case white = 4
+
+        if let Pill = NSClassFromString("MT" + "Luma" + "Dodge" + "Pill" + "View") as? UIView.Type {
+            
+            let pillView = Pill.init()
+            
+            enum Style: Int {
+                case none = 0
+                case thin = 1
+                case gray = 2
+                case black = 3
+                case white = 4
+            }
+            
+            enum BackgroundLuminance: Int {
+                case unknown = 0
+                case dark = 1
+                case light = 2
+            }
+            
+            pillView.setValue(2, forKey: "style")
+            pillView.setValue(1, forKey: "background" + "Luminance")
+            pillView.perform(NSSelectorFromString("_" + "update" + "Style"))
+            
+            addSubview(pillView)
+            
+            pillView.translatesAutoresizingMaskIntoConstraints = false
+            
+            NSLayoutConstraint.activate([
+                pillView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                pillView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                pillView.topAnchor.constraint(equalTo: topAnchor),
+                pillView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+            
+            return pillView
+        } else {
+            let visualEffectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterialDark))
+            addSubview(visualEffectView)
+            
+            visualEffectView.translatesAutoresizingMaskIntoConstraints = false
+            
+            NSLayoutConstraint.activate([
+                visualEffectView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                visualEffectView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                visualEffectView.topAnchor.constraint(equalTo: topAnchor),
+                visualEffectView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+            
+            return visualEffectView
         }
-        
-        enum BackgroundLuminance: Int {
-            case unknown = 0
-            case dark = 1
-            case light = 2
-        }
-        
-        pillView.setValue(2, forKey: "style")
-        pillView.setValue(1, forKey: "background" + "Luminance")
-        pillView.perform(NSSelectorFromString("_" + "update" + "Style"))
-        
-        addSubview(pillView)
-        
-        pillView.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            pillView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            pillView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            pillView.topAnchor.constraint(equalTo: topAnchor),
-            pillView.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-        
-        return pillView
     }()
     
     lazy var foregroundView: UIView = {
@@ -1412,60 +1500,16 @@ fileprivate func _debugPrint(_ items: Any) {
 // Support for auto-rotate.
 @available(iOS 14.0, *)
 class ConsoleViewController: UIViewController {
+    var previousSize: CGSize?
     
-    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
-        
-        // Cancel the panner console is being panned to allow for location manipulation.
-        [LCManager.shared.panRecognizer, LCManager.shared.longPressRecognizer].forEach {
-            $0.isEnabled.toggle(); $0.isEnabled.toggle()
-        }
-        
-        if UIDevice.current.userInterfaceIdiom != .pad && ResizeController.shared.isActive {
-            ResizeController.shared.isActive = false
-            ResizeController.shared.platterView.dismiss()
-        }
-        
-        if UIDevice.current.userInterfaceIdiom == .pad && ResizeController.shared.isActive {
-            DispatchQueue.main.async {
-                UIViewPropertyAnimator(duration: 0.6, dampingRatio: 1) {
-                    LCManager.shared.consoleView.center = ResizeController.shared.consoleCenterPoint
-                }.startAnimation(afterDelay: 0.05)
-            }
-            
-        } else {
-            let consoleView = LCManager.shared.consoleView
-            let oldSize = LCManager.shared.viewController.view.frame.size
-            
-            let targetLocationEstimate: CGPoint = {
-                var xPosition = consoleView.center.x
-                var yPosition = consoleView.center.y
-                
-                if consoleView.center.x > oldSize.width / 2 {
-                    xPosition += size.width - oldSize.width
-                }
-                
-                if consoleView.center.y > oldSize.height / 2 {
-                    yPosition += size.height - oldSize.height
-                }
-                
-                return CGPoint(x: xPosition, y: yPosition)
-            }()
-            
-            UIViewPropertyAnimator(duration: 0.6, dampingRatio: 1) {
-                consoleView.center = targetLocationEstimate
-            }.startAnimation(afterDelay: 0.05)
-            
-            DispatchQueue.main.async {
-                // Update portrait orientation menu option for resize controller.
-                LCManager.shared.menuButton.menu = LCManager.shared.makeMenu()
-                
-                // Reassess center of console based on target location estimate.
-                UIViewPropertyAnimator(duration: 0.6, dampingRatio: 1) {
-                    consoleView.center = nearestTargetTo(consoleView.center, possibleTargets: LCManager.shared.possibleEndpoints)
-                }.startAnimation(afterDelay: 0.05)
-                
-                LCManager.shared.reassessGrabberMode()
-            }
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+
+        if let previousSize = previousSize, previousSize != view.bounds.size {
+            LCManager.shared.handleDeviceOrientationChange(previousSize: previousSize)
+            self.previousSize = view.bounds.size
+        } else if previousSize == nil {
+            previousSize = view.bounds.size
         }
     }
 }
