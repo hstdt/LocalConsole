@@ -1252,6 +1252,7 @@ public class LCManager: NSObject, UIGestureRecognizerDelegate {
 }
 
 /// Custom button that pauses console window swizzling to allow the console menu's presenting view controller to remain the top view controller.
+@available(iOS 14.0, *)
 class ConsoleMenuButton: UIButton {
     override func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
         super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
